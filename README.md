@@ -1,27 +1,25 @@
-# nginx-reverse-proxy-cloudflare (LAN-only, DNS-01)
+# lan-nginx-reverse-proxy-cloudflare
 
-Reverse proxy for a **home LAN** using **NGINX** and **Let's Encrypt** wildcard certs via **Cloudflare DNS-01**.
-Nothing is exposed to the internet: traffic binds only to your LAN IP and each virtual host is allowlisted to
-`192.168.144.0/24`.
+Reverse proxy for a **home LAN** using **NGINX** and **Let’s Encrypt** wildcard certs via **Cloudflare DNS-01**.  
+Designed for **LAN-only** access (no WAN port-forwarding). Each vhost is allowlisted to `192.168.144.0/24`.
 
 **Highlights**
 - Rootful `nginx:1.27-alpine` (simple cert permissions)
 - Host ports **80/443** bound to `LAN_BIND` only → container listens on **8080/8443**
-- Per-host servers for: `pfsense.hjalti.me`, `unifi.hjalti.me`, `pve.hjalti.me`, `plex.hjalti.me`
-- **Wildcard** certificate for `hjalti.me` + `*.hjalti.me` (Cloudflare DNS token, least-privilege)
+- Per-host servers: `pfsense.hjalti.me`, `unifi.hjalti.me`, `pve.hjalti.me`, `plex.hjalti.me`
+- **Wildcard** certificate for `hjalti.me` + `*.hjalti.me` via Cloudflare DNS-01
 - `certbot` runs **on-demand** (no long-running container)
-- Healthcheck hits `/healthz` on port 8080 (LAN-allowlisted + localhost allowed)
+- **Healthcheck uses `nginx -t`** (config test); `/healthz` is provided for manual checks
 - Uses `http2 on;` (newer nginx syntax)
 
-> For a full setup guide see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** and **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**.
+> Full guide: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** • Troubleshooting: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 ---
 
 ## Quick start
 
-1) **pfSense DNS Resolver → Host Overrides** (no WAN port-forwarding!)
-
-   Point these names to your Docker host LAN IP (e.g., `192.168.144.50`):
+1) **pfSense DNS → Host Overrides**  
+   Point these to your Docker host LAN IP (e.g., `192.168.144.50`):
    - `pfsense.hjalti.me`, `unifi.hjalti.me`, `pve.hjalti.me`, `plex.hjalti.me` → `192.168.144.50`
 
 2) **Configure env + secrets**
@@ -37,14 +35,14 @@ chmod 600 secrets/cloudflare.ini
 #   dns_cloudflare_api_token = <token>
 ```
 
-3) **Start containers**
+3) **Start services**
 ```bash
 docker compose up -d
 ```
 
-4) **Issue the wildcard certificate (DNS-01; outbound only)**
+4) **Issue the wildcard certificate**
 ```bash
-docker compose run --rm certbot certonly   --dns-cloudflare --dns-cloudflare-credentials /secrets/cloudflare.ini   -d hjalti.me -d '*.hjalti.me'   --agree-tos --email you@hjalti.me --no-eff-email --non-interactive
+docker compose run --rm certbot certonly   --dns-cloudflare   --dns-cloudflare-credentials /secrets/cloudflare.ini   -d hjalti.me -d '*.hjalti.me'   --agree-tos --email you@hjalti.me --no-eff-email --non-interactive
 
 docker exec nginx-rproxy nginx -t && docker exec nginx-rproxy nginx -s reload
 ```
@@ -63,7 +61,25 @@ crontab -e
 ```
 Add:
 ```
-0 2,14 * * * cd /path/to/nginx-reverse-proxy-cloudflare &&   docker compose run --rm certbot renew     --dns-cloudflare --dns-cloudflare-credentials /secrets/cloudflare.ini     --quiet && docker exec nginx-rproxy nginx -s reload
+0 2,14 * * * cd /path/to/lan-nginx-reverse-proxy-cloudflare &&   docker compose run --rm certbot renew     --dns-cloudflare --dns-cloudflare-credentials /secrets/cloudflare.ini     --quiet && docker exec nginx-rproxy nginx -s reload
+```
+
+---
+
+## Healthcheck
+
+- **Docker healthcheck:** uses a configuration test (robust across environments):
+```yaml
+healthcheck:
+  test: ["CMD", "nginx", "-t"]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+```
+- **Manual check (from host/LAN):** `/healthz` returns `ok` on port 8080:
+```bash
+curl -s http://$LAN_BIND/healthz
 ```
 
 ---
@@ -73,28 +89,29 @@ Add:
 ```
 conf.d/
   00-global.conf
-  20-http-redirect.conf          # allows 127.0.0.1 for healthcheck
+  20-http-redirect.conf          # /healthz (200) + redirect everything else → HTTPS
   pfsense.hjalti.me.conf         # LAN-only
   unifi.hjalti.me.conf           # LAN-only + WebSockets
   pve.hjalti.me.conf             # LAN-only + WebSockets
   plex.hjalti.me.conf            # LAN-only + streaming opts
   includes/
-    cloudflare-real-ip.conf      # optional (only if CF proxy is enabled; not used for LAN-only)
+    cloudflare-real-ip.conf      # optional (if ever proxying via Cloudflare)
 docker-compose.yml               # binds host 80/443 to LAN_BIND -> container 8080/8443
 .env.example
 secrets/cloudflare.ini.example
-.github/workflows/ci.yml         # compose sanity + nginx -t with stub certs
+docs/DEPLOYMENT.md
+docs/TROUBLESHOOTING.md
+Makefile                          # helper targets (up/down/reload/issue-cert/renew/...)
 ```
 
 ---
 
 ## Notes
+- Keep the Cloudflare token **scoped to a single zone** with **Zone → DNS → Edit** privileges.
+- No WAN port-forward is required; DNS-01 works with outbound-only API calls.
+- Back up the Let’s Encrypt Docker volume (`letsencrypt-backup.tgz` via `make backup-certs`).
 
-- The **healthcheck** in `docker-compose.yml` uses BusyBox `wget` inside the container and the redirect server allows
-  `127.0.0.1` for `/healthz`, so it reports **healthy**.
-- `http2 on;` is used per server (nginx ≥1.25 deprecates the `listen ... http2` flag).
-- No WAN port-forwards are required; DNS-01 works via Cloudflare API + Let’s Encrypt.
+---
 
-## CI Badge
-[![CI](https://github.com/hjaltiatla/lan-nginx-reverse-proxy-cloudflare/actions/workflows/ci.yml/badge.svg)](https://github.com/hjaltiatla/lan-nginx-reverse-proxy-cloudflare/actions/workflows/ci.yml)
-
+## License
+MIT
