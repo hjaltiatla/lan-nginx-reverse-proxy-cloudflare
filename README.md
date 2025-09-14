@@ -94,3 +94,7 @@ secrets/cloudflare.ini.example
   `127.0.0.1` for `/healthz`, so it reports **healthy**.
 - `http2 on;` is used per server (nginx ≥1.25 deprecates the `listen ... http2` flag).
 - No WAN port-forwards are required; DNS-01 works via Cloudflare API + Let’s Encrypt.
+
+## CI Badge
+[![CI](https://github.com/hjaltiatla/lan-nginx-reverse-proxy-cloudflare/actions/workflows/ci.yml/badge.svg)](https://github.com/hjaltiatla/lan-nginx-reverse-proxy-cloudflare/actions/workflows/ci.yml)
+
