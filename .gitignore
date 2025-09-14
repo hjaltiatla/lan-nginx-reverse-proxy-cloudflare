@@ -1,0 +1,10 @@
+# secrets & local env
+secrets/
+.env
+cloudflare.ini
+cloudflare.ini.example.local
+
+# os/editor cruft
+.DS_Store
+.idea/
+.vscode/
