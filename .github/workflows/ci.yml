@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  nginx-config-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create stub certs for nginx -t
+        run: |
+          mkdir -p .ci/letsencrypt/live/hjalti.me
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout .ci/letsencrypt/live/hjalti.me/privkey.pem \
+            -out    .ci/letsencrypt/live/hjalti.me/fullchain.pem \
+            -subj "/CN=example.invalid"
+
+      - name: Validate nginx configs
+        run: |
+          docker run --rm \
+            -v "$PWD/conf.d:/etc/nginx/conf.d:ro" \
+            -v "$PWD/.ci/letsencrypt:/etc/letsencrypt:ro" \
+            nginx:1.27-alpine nginx -t
